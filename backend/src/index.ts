@@ -1,0 +1,64 @@
+import './config/env';
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import { initWorkers } from './jobs/worker';
+import { logger } from './utils/logger';
+import { metricsMiddleware, getMetrics } from './utils/metrics';
+
+import authRoutes from './routes/auth.routes';
+import profileRoutes from './routes/profile.routes';
+import contentRoutes from './routes/content.routes';
+import sessionRoutes from './routes/session.routes';
+import notificationRoutes from './routes/notification.routes';
+import reportRoutes from './routes/report.routes';
+import moderationRoutes from './routes/moderation.routes';
+
+// Initialize workers
+initWorkers();
+
+import { globalLimiter } from './middleware/rateLimiter';
+
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.use(helmet());
+app.use(cookieParser());
+app.use(express.json());
+
+// Apply global rate limiter
+app.use(globalLimiter);
+
+// Observability Middleware
+app.use(metricsMiddleware);
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:4173'],
+  credentials: true
+}));
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url}`);
+  next();
+});
+
+app.get('/metrics', getMetrics);
+
+app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/content', contentRoutes);
+app.use('/api/sessions', sessionRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/moderation', moderationRoutes);
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
+}
+
+export default app;

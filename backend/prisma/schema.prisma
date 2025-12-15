@@ -1,0 +1,296 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  LEARNER
+  ADMIN
+  ANALYST
+}
+
+enum ContentType {
+  VIDEO
+  ARTICLE
+  MICRO_MODULE
+}
+
+enum InteractionType {
+  VIEW
+  COMPLETE
+  LIKE
+  SKIP
+  SHARE
+}
+
+enum FlagReason {
+  INAPPROPRIATE
+  MISLEADING
+  SPAM
+  OTHER
+}
+
+enum FlagStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id             String   @id @default(uuid())
+  email          String   @unique
+  password       String?
+  name           String?
+  role           Role     @default(LEARNER)
+  googleId       String?  @unique
+  avatarUrl      String?
+  
+  level          Int      @default(1)
+  currentXP      Int      @default(0)
+  currentStreak  Int      @default(0)
+  lastActivity   DateTime @default(now())
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  preferences      Preference?
+  refreshTokens    RefreshToken[]
+  sessions         LearningSession[]
+  interactions     InteractionEvent[]
+  xpTransactions   XPTransaction[]
+  userChallenges   UserChallenge[]
+  userBadges       UserBadge[]
+  reminders        ReminderSchedule[]
+  notificationLogs NotificationLog[]
+  flaggedCases     FlagCase[] @relation("Reporter")
+  moderatedCases   FlagCase[] @relation("Moderator") // If admin
+  auditLogs        AuditLog[]
+  pushSubscriptions PushSubscription[]
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Preference {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  topics         String[]
+  quietHoursStart String? // HH:MM format
+  quietHoursEnd   String? // HH:MM format
+  dailyGoalMins   Int     @default(15)
+  user           User     @relation(fields: [userId], references: [id])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  isRevoked Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Content {
+  id          String      @id @default(uuid())
+  title       String
+  description String?
+  url         String
+  source      String?
+  type        ContentType
+  duration    Int // in seconds
+  thumbnail   String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tags        ContentTag[]
+  sessions    LearningSession[]
+  flagCases   FlagCase[]
+  
+  @@index([createdAt])
+  @@index([type])
+}
+
+model Tag {
+  id       String       @id @default(uuid())
+  name     String       @unique
+  contents ContentTag[]
+}
+
+model ContentTag {
+  contentId String
+  tagId     String
+  content   Content @relation(fields: [contentId], references: [id])
+  tag       Tag     @relation(fields: [tagId], references: [id])
+
+  @@id([contentId, tagId])
+}
+
+model LearningSession {
+  id             String   @id @default(uuid())
+  userId         String
+  contentId      String
+  startTime      DateTime @default(now())
+  endTime        DateTime?
+  duration       Int?     // Computed duration in seconds
+  isCompleted    Boolean  @default(false)
+  
+  user           User     @relation(fields: [userId], references: [id])
+  content        Content  @relation(fields: [contentId], references: [id])
+  interactions   InteractionEvent[]
+  
+  @@index([userId])
+}
+
+model InteractionEvent {
+  id        String          @id @default(uuid())
+  sessionId String
+  type      InteractionType
+  timestamp DateTime        @default(now())
+  metadata  Json?           // Additional details
+
+  session   LearningSession @relation(fields: [sessionId], references: [id])
+  
+  userId    String // Denormalized for query speed
+  user      User   @relation(fields: [userId], references: [id])
+
+  @@index([userId, timestamp])
+}
+
+model XPTransaction {
+  id        String   @id @default(uuid())
+  userId    String
+  amount    Int
+  source    String   // "SESSION", "CHALLENGE", "BONUS"
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Challenge {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  xpReward    Int
+  startDate   DateTime
+  endDate     DateTime
+  
+  userChallenges UserChallenge[]
+}
+
+model UserChallenge {
+  id          String    @id @default(uuid())
+  userId      String
+  challengeId String
+  progress    Int       @default(0)
+  target      Int // Target value to complete
+  isCompleted Boolean   @default(false)
+  completedAt DateTime?
+  
+  user      User      @relation(fields: [userId], references: [id])
+  challenge Challenge @relation(fields: [challengeId], references: [id])
+
+  @@unique([userId, challengeId])
+}
+
+model Badge {
+  id          String   @id @default(uuid())
+  name        String
+  description String
+  iconUrl     String
+  
+  userBadges  UserBadge[]
+}
+
+model UserBadge {
+  id      String   @id @default(uuid())
+  userId  String
+  badgeId String
+  awardedAt DateTime @default(now())
+
+  user    User   @relation(fields: [userId], references: [id])
+  badge   Badge  @relation(fields: [badgeId], references: [id])
+
+  @@unique([userId, badgeId])
+}
+
+model ReminderSchedule {
+  id          String   @id @default(uuid())
+  userId      String
+  time        String   // HH:MM
+  days        Int[]    // Array of day indices (0=Sun, 6=Sat)
+  isEnabled   Boolean  @default(true)
+  lastSentAt  DateTime?
+
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model NotificationLog {
+  id          String   @id @default(uuid())
+  userId      String
+  type        String   // "REMINDER", "REPORT", "ALERT"
+  channel     String   // "PUSH", "EMAIL"
+  status      String   // "SENT", "FAILED"
+  sentAt      DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model WeeklyReport {
+  id              String   @id @default(uuid())
+  userId          String
+  weekStartDate   DateTime // User's timezone start
+  totalSessions   Int
+  totalProductiveMins Int
+  score           Float    // Social Media Reduction Proxy Score
+  chartData       Json     // Precomputed JSON for charts
+  createdAt       DateTime @default(now())
+
+  @@unique([userId, weekStartDate])
+}
+
+model FlagCase {
+  id          String      @id @default(uuid())
+  contentId   String
+  reporterId  String
+  reason      FlagReason
+  details     String?
+  status      FlagStatus  @default(PENDING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  
+  content     Content     @relation(fields: [contentId], references: [id])
+  reporter    User        @relation("Reporter", fields: [reporterId], references: [id])
+  
+  moderatorId String?
+  moderator   User?       @relation("Moderator", fields: [moderatorId], references: [id])
+  decisionNote String?
+
+  @@index([status])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String
+  action    String
+  target    String?
+  details   Json?
+  timestamp DateTime @default(now())
+
+  actor     User     @relation(fields: [actorId], references: [id])
+}
