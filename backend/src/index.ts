@@ -33,7 +33,7 @@ app.use(globalLimiter);
 // Observability Middleware
 app.use(metricsMiddleware);
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:4173'],
+  origin: true, // Allow any origin
   credentials: true
 }));
 app.use((req, res, next) => {
